@@ -1,0 +1,344 @@
+# librarys usadas
+import pandas as pd
+import os
+import pathlib
+import numpy as np
+import seaborn as sns
+import matplotlib.pyplot as plt
+from IPython.display import display
+import plotly.express as px
+import time
+import joblib
+
+# librarys AIs
+
+from sklearn.metrics import r2_score, mean_squared_error
+from sklearn.linear_model import LinearRegression
+from sklearn.ensemble import RandomForestRegressor, ExtraTreesRegressor
+from sklearn.model_selection import train_test_split
+
+
+db_path = pathlib.Path('D:\DB')
+df_airbnb = pd.DataFrame()
+
+month_dict = {'jan':1, 'fev':2, 'mar':3, 'abr':4, 'mai':5, 'jun':6,
+              'jul':7, 'ago':8, 'set':9, 'out':10, 'nov':11, 'dez':12}
+
+for file in db_path.iterdir():
+    df = pd.read_csv(db_path / file.name)
+    df['month'] = month_dict[file.name[:3]]
+    df['year'] = int(file.name[-8:-4])
+    df_airbnb = df_airbnb.append(df)
+
+
+#df_airbnb.head(200).to_csv('200 registros.csv', sep=';')
+#print(df_airbnb['host_listings_count']==df_airbnb['host_total_listings_count']).value_counts(
+#print(df_airbnb['square_feet']).isnull().sum())
+####################################################################################
+################ COLUNAS QUE SERÃO MANTIDAS EM UMA PRIMEIRA ANALISE ################
+keep_columns = ['host_response_time', 'host_response_rate', 'host_is_superhost', 'host_total_listings_count',
+                'latitude', 'longitude', 'property_type', 'room_type', 'accommodates', 'bathrooms', 'bedrooms', 'beds',
+                'bed_type', 'amenities', 'price','security_deposit', 'cleaning_fee', 'guests_included', 'extra_people',
+                'minimum_nights', 'maximum_nights', 'number_of_reviews', 'review_scores_rating', 'review_scores_accuracy',
+                'review_scores_cleanliness', 'review_scores_checkin', 'review_scores_communication', 'review_scores_location',
+                'review_scores_value', 'instant_bookable', 'is_business_travel_ready', 'cancellation_policy', 'mes', 'ano']
+
+df_airbnb = df_airbnb.loc[:, keep_columns]
+####################################################################################
+#### VERIFICAÇÃO DE COLUNAS COM MUITOS NULOS E QTDE DE LINHAS COM VALORES NULOS ####
+# Verificando quais colunas tem uma quantidade de nulos maior que 35% de valores nulos
+# print(df_airbnb.isnull().sum())
+# Serão excluidas colunas onde o valor de nulos for maior que 35% de nulos
+print(df_airbnb.shape)
+total_len = len(df_airbnb.index)*0.35
+for columns in df_airbnb:
+    if df_airbnb[columns].isnull().sum() > total_len:
+        df_airbnb = df_airbnb.drop(columns, axis=1)
+
+# depois em segunda analise será excluido as linhas com quantidade nula pois perante a quantidade geral com relação ao total é pequena
+df_airbnb = df_airbnb.dropna()
+
+####################################################################################
+################## VERIFICAÇÃO DOS TIPOS DE DADOS NAS COLUNAS ######################
+# tratamento dos tipos de dados quando necessário
+# price / extra_people tem que mudar para float pois estão como objeto
+print(df_airbnb.dtypes)
+print('-'*10)
+#mudar o tipo para float32/int32 pois ocupa menos espaço na memória
+str_float = ['price', 'extra_people']
+for columns in str_float:
+    df_airbnb[columns] = df_airbnb[columns].str.replace(r'$', '')
+    df_airbnb[columns] = df_airbnb[columns].str.replace(r',', '')
+    df_airbnb[columns] = df_airbnb[columns].astype(np.float32, copy=False)
+
+
+####################################################################################
+###################### ANALISE EXPLORATORIO E TRATAR OUTLIERS ######################
+
+#Calcuo para o outlier inferior(Q1- 1.5 x Amplitudee) superior(Q3 + 1.5 x Amplitudee)
+#Amplitude = Q3- Q1
+#Analisando os outliers e verificando se precisa ou não ser removido
+
+#Calcuo para o outlier inferior(Q1- 1.5 x Amplitudee) superior(Q3 + 1.5 x Amplitudee)
+#Amplitude = Q3- Q1
+#Analisando os outliers e verificando se precisa ou não ser removido
+
+plt.figure(figsize=(20,12))
+sns.heatmap(df_airbnb.corr(), annot=True, cmap='Reds') # correlação de todas as colunas entre uma e outra usando um heatmap
+
+def limite(coluna):
+    q1 = coluna.quantile(0.25)
+    q3 = coluna.quantile(0.75)
+    amplitude = q3-q1
+    return (q1-1.5*amplitude, q3+1.5*amplitude)
+
+def diagrama_caixa(coluna):
+    fig, (ax1, ax2) = plt.subplots(1, 2)
+    fig.set_size_inches(18, 5)
+    sns.boxplot(x=coluna, ax=ax1)
+    ax2.set_xlim(limite(coluna))
+    sns.boxplot(x=coluna, ax=ax2)
+
+def histograma(coluna):
+    plt.figure(figsize=(15, 5))
+    sns.distplot(coluna, hist=True)
+
+def grafico_barras(coluna):
+    plt.figure(figsize=(15, 5))
+    ax = sns.barplot(x=coluna.value_counts().index ,y=coluna.value_counts())
+    ax.set_xlim(limite(coluna))
+
+def remove_outliers(df, nome_coluna):
+    lines_quantity = df.shape[0]
+    lim_inf, lim_sup = limite(df[nome_coluna])
+    df = df.loc[(df[nome_coluna] >= lim_inf) & (df[nome_coluna] <= lim_sup), :]
+    return df, lines_quantity - df.shape[0]
+
+
+
+diagrama_caixa(df_airbnb['price'])
+histograma(df_airbnb['price'])
+#remoção dos outliers de price e extra_people
+# Devido a essa analise tratar-se para um modelo de imóveis comuns qualquer imóvel que estiver acima do limite padrão será excluido pois entende-se que sejam de alto padrão,
+# o qual não é o objetivo desta analise. Portanto os mesmos serão excluidos
+df_airbnb, removed_lines = remove_outliers(df_airbnb, 'price')
+# print(f'{removed_lines}')
+diagrama_caixa(df_airbnb['price'])
+histograma(df_airbnb['price'])
+
+df_airbnb, removed_lines = remove_outliers(df_airbnb, 'extra_people')
+# print(f'{removed_lines}')
+diagrama_caixa(df_airbnb['extra_people'])
+histograma(df_airbnb['extra_people'])
+
+
+df_airbnb, removed_lines = remove_outliers(df_airbnb, 'extra_people')
+# print(f'{removed_lines}')
+diagrama_caixa(df_airbnb['extra_people'])
+histograma(df_airbnb['extra_people'])
+
+#### PARA AS COLUNAS ABAIXO FOI USADO GRAFICO DE POR POSSUIREM VALORES DISCRETOS
+df_airbnb, removed_lines = remove_outliers(df_airbnb, 'minimum_nights')
+#print(f'{removed_lines}')
+diagrama_caixa(df_airbnb['minimum_nights'])
+grafico_barras(df_airbnb['minimum_nights'])
+
+df_airbnb, removed_lines = remove_outliers(df_airbnb, 'beds')
+#print(f'{removed_lines}')
+diagrama_caixa(df_airbnb['beds'])
+grafico_barras(df_airbnb['beds'])
+
+df_airbnb, removed_lines = remove_outliers(df_airbnb, 'accommodates')
+# print(f'{removed_lines}')
+diagrama_caixa(df_airbnb['accommodates'])
+grafico_barras(df_airbnb['accommodates'])
+
+
+diagrama_caixa(df_airbnb['host_total_listings_count'])
+grafico_barras(df_airbnb['host_total_listings_count'])
+
+diagrama_caixa(df_airbnb['host_total_listings_count'])
+grafico_barras(df_airbnb['host_total_listings_count'])
+
+diagrama_caixa(df_airbnb['bathrooms'])
+grafico_barras(df_airbnb['bathrooms'])
+
+diagrama_caixa(df_airbnb['bedrooms'])
+grafico_barras(df_airbnb['bedrooms'])
+
+diagrama_caixa(df_airbnb['guests_included'])
+grafico_barras(df_airbnb['guests_included'])
+
+
+### MAXIMUM NIGHTS
+#Este campo foi removido pois tanto o limite inferior quanto o limite superior estavam muitos dinstintos, desta forma foi concluido que ele não
+#teria interferencia na analise do valor.
+df_airbnb = df_airbnb.drop('maximum_nights', axis=1)
+
+### Maximum nights and Number of Reviews
+### MAXIMUM NIGHTS - Este campo foi removido pois tanto o limite inferior quanto o limite superior estavam muitos dinstintos,
+### desta forma foi concluido que ele não teria interferencia na analise do valor.
+### NUMBER OF REVIEWS - COM RELAÇAO A METRICA DE REVIEWS ELA TEM FATOR AMBIGUO POIS PARA UMA PESSOA QUE ESTÁ ENTRANDO NO AIRBNB NO MOMENTO
+### ELA NÃO TERIA NENHUM REVIEW PORTANTO UM MODELO SEM ELES EM UM PRIMEIRO MOMENTO NÁO FAZ SENTIDO POREM FUTURAMENTE PODERIA FAZER SENTINDO
+df_airbnb = df_airbnb.drop('maximum_nights', axis=1)
+df_airbnb = df_airbnb.drop('number_of_reviews', axis=1)
+
+
+tipos_de_casas = df_airbnb['property_type'].value_counts()
+colunas_agrupar = [tipo for tipo in tipos_de_casas.index if tipos_de_casas[tipo] < 11500]
+for tipo in colunas_agrupar:
+    df_airbnb.loc[df_airbnb['property_type']==tipo, 'property_type'] = 'Other'
+df_airbnb['property_type'].value_counts()
+
+### Tratamento de colunas com texto ###
+
+##Property Type
+tipos_de_casas = df_airbnb['property_type'].value_counts()
+colunas_agrupar = [tipo for tipo in tipos_de_casas.index if tipos_de_casas[tipo] < 11500]
+for tipo in colunas_agrupar:
+    df_airbnb.loc[df_airbnb['property_type']==tipo, 'property_type'] = 'Other'
+df_airbnb['property_type'].value_counts()
+count_plot(df_airbnb, 'property_type')
+
+##Bed type, Room type
+count_plot(df_airbnb, 'room_type')
+count_plot(df_airbnb, 'bed_type')
+
+##Cancellation policy
+tipos_cancelamento = df_airbnb['cancellation_policy'].value_counts()
+colunas_agrupar = [tipo for tipo in tipos_cancelamento.index if tipos_cancelamento[tipo] < 11500]
+for tipo in colunas_agrupar:
+    df_airbnb.loc[df_airbnb['cancellation_policy']==tipo, 'cancellation_policy'] = 'strict'
+df_airbnb['cancellation_policy'].value_counts()
+count_plot(df_airbnb, 'cancellation_policy')
+
+
+#### Amenities
+#### Gde diversidade de amenities portanto será levado em conta a quantidade como parametro
+df_airbnb['n_amenities'] = df_airbnb['amenities'].str.split(',').apply(len)
+df_airbnb = df_airbnb.drop('amenities', axis=1)
+#print(df_airbnb['n_amenities'])
+
+df_airbnb, removed_lines = remove_outliers(df_airbnb, 'n_amenities')
+diagrama_caixa(df_airbnb['n_amenities'])
+grafico_barras(df_airbnb['n_amenities'])
+
+
+### longitude e latitude
+sample = df_airbnb.sample(n=100000)
+center_map = {'lat':sample.latitude.mean(), 'lon':sample.longitude.mean()}
+map = px.density_mapbox(sample, lat='latitude', lon='longitude', z='price', radius=2.5,
+                        center=center_map, zoom=10,
+                        mapbox_style='carto-positron')
+map.show()
+
+#### ENCONDING ###
+### Treinamento para o modelo de inteligencia artifical
+
+### Features de True/False serão substituidas por 1/0 respectivamente
+tf_columns = ['host_is_superhost', 'instant_bookable', 'is_business_travel_ready']
+df_airbnb_cod = df_airbnb.copy()
+for coluna in tf_columns:
+    df_airbnb_cod.loc[df_airbnb_cod[coluna]=='t', coluna] = 1
+    df_airbnb_cod.loc[df_airbnb_cod[coluna]=='f', coluna] = 0
+#display(df_airbnb_cod.iloc[0])
+
+### Features de categorias serão substituidas pelo método de enconding de dummies variables
+Category_columns = ['property_type', 'room_type', 'bed_type', 'cancellation_policy']
+df_airbnb_cod = pd.get_dummies(data=df_airbnb_cod, columns=Category_columns)
+
+
+######################################## MODELO DE PREVISÃO ###################################
+
+### Métricas de Avaliação
+
+def evaluate_models(model, y_test, prevision, start):
+        r2 = r2_score(y_test, prevision)
+        RSME = np.sqrt(mean_squared_error(y_test, prevision))
+        total_time = time.time() - start
+        return f'Modelo: {model} \nR2: {r2:.2%} \nRSME: {RSME:.2f} \n Time: {total_time}'
+
+########## Modelos a serem testados
+##########  - RandomForest
+##########  - Linear Regression
+##########  - Extra Tree
+
+dict_models = {'random': RandomForestRegressor(),
+               'linear': LinearRegression(),
+               'extra': ExtraTreesRegressor()}
+
+
+y = df_airbnb_cod['price']
+x = df_airbnb_cod.drop('price', axis=1)
+
+#random_state defini a aleatoriedade do split fixando a seleção aleatória identica pra varias vezes que rodar o código
+x_train, x_test, y_train, y_test = train_test_split(x, y, random_state=10)
+
+for name, model in dict_models.items():
+    start = time.time()
+    #training
+    model.fit(x_train, y_train)
+    #tests
+    print(evaluate_models(name, y_test, model.predict(x_test), start))
+
+##########Modelo Escolinho foi o ExtraTreesRegressor
+##########  Por ter o maior R² e ao mesmo tempo tendo o menor RSME(Erro quadrático médio)
+##########  A velocidade do ExtraTrees foi um pouco superior mas com valores de R² maior e RSME menor
+##########  O LinearRegressiom teve um R² e RSME muito ruins
+
+chosen_model = dict_models['extra']
+#print(chosen_model.feature_importances_)
+#print(x_train.columns)
+Features = pd.DataFrame(chosen_model.feature_importances_, x_train.columns)
+Features = Features.sort_values(by=0, ascending=False)
+plt.figure(figsize=(18,5))
+ax = sns.barplot(x=Features.index, y=Features[0])
+display(Features)
+ax.tick_params(axis='x', rotation=90)
+
+# is_business_travel_ready foi removida por não ter tido nenumha relevância na hora da analise do modelo
+df_airbnb_cod = df_airbnb_cod.drop('is_business_travel_ready', axis=1)
+
+x_train, x_test, y_train, y_test = train_test_split(x, y, random_state=10)
+
+y = df_airbnb_cod['price']
+x = df_airbnb_cod.drop('price', axis=1)
+
+start = time.time()
+#training
+chosen_model.fit(x_train, y_train)
+#tests
+print(evaluate_models('ExtraTrees', y_test, chosen_model.predict(x_test), start))
+
+df_test = df_airbnb_cod.copy()
+for drop_column in ['bed_type_Pull-out Sofa', 'bed_type_Real Bed', 'bed_type_Couch', 'bed_type_Airbed']:
+    df_test = df_test.drop(drop_column, axis=1)
+
+x_train, x_test, y_train, y_test = train_test_split(x, y, random_state=10)
+
+y = df_test['price']
+x = df_test.drop('price', axis=1)
+
+start = time.time()
+#training
+chosen_model.fit(x_train, y_train)
+#tests
+print(evaluate_models('ExtraTrees', y_test, chosen_model.predict(x_test), start))
+
+
+##### Deploy do Projeto
+#1 -> Criar arquivo do modelo
+#2 -> Escolher a forma do deploy
+#   - Arquivo executavel + Tkinter
+#   - Deploy em um site(Flask)
+#   - Deploy para uso direto (Streamlit)
+#3 -> Outro arquivo .py
+#4 -> Importar streamlit(library)
+#5 -> Criar botão para que a rotina seja executada
+#6 -> Finalização
+
+#Base de dados salva com todos os tratamentos
+#x['price'] = y
+#x.to_csv('dados.csv')
+
+joblib.dump(chosen_model, 'model_et.joblib')
