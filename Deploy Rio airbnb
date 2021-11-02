@@ -1,0 +1,53 @@
+import pandas as pd
+import streamlit as st
+import joblib
+
+x_numericos = {'latitude': 0, 'longitude': 0, 'accommodates': 0, 'bathrooms': 0, 'bedrooms': 0, 'beds': 0,
+               'extra_people': 0, 'minimum_nights': 0, 'ano': 0, 'mes': 0, 'n_amenities': 0,
+               'host_listings_count': 0, 'guests_included': 0}
+
+x_tf = {'host_is_superhost': 0, 'instant_bookable': 0, 'is_business_travel_ready': 0}
+
+x_listas = {
+    'property_type': ['Apartment', 'Bed and breakfast', 'Condominium', 'Guest suite', 'Guesthouse', 'Hostel', 'House',
+                      'Loft', 'Outros', 'Serviced apartment'],
+    'room_type': ['Entire home/apt', 'Hotel room', 'Private room', 'Shared room'],
+    'cancelation_policy': ['flexible', 'moderate', 'strict', 'strict_14_with_grace_period']
+    }
+
+support_dict = {}
+for item in x_listas:
+    for value in x_listas[item]:
+        support_dict[f'{item}_{value}'] = 0
+# print(support_dict)
+
+for item in x_numericos:
+    if item == 'latitude' or item == 'longitude':
+        value = st.number_input(f'{item}', step=0.00001, value=0.0, format='%.5f')
+    elif item == 'extra_people':
+        value = st.number_input(f'{item}', step=0.01, value=0.0)
+    else:
+        value = st.number_input(f'{item}', value=0, step=1)
+        x_numericos[item] = value
+
+
+for item in x_tf:
+    true_false = st.selectbox(f'{item}', ('Sim', 'Não'))
+    if true_false == 'Sim':
+        x_tf[item] == 1
+    else:
+        x_tf[item] == 0
+
+for item in x_listas:
+    str_value = st.selectbox(f'{item}', x_listas[item])
+    support_dict[f'{item}_{str_value}'] = 1
+
+button = st.button('Prever Valor do Imóvel')
+
+if button:
+    support_dict.update(x_numericos)
+    support_dict.update(x_tf)
+    df_x = pd.DataFrame(support_dict, index=[0])
+    model = joblib.load('model_et.joblib')
+    price = model.predict(df_x)
+    st.write(price[0])
